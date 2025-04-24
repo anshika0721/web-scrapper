@@ -1,0 +1,174 @@
+"""
+Authentication handler module for managing various authentication methods
+"""
+
+import json
+import logging
+from typing import Dict, Optional, Union
+
+import requests
+from requests.auth import HTTPBasicAuth
+
+class AuthHandler:
+    """Handler for various authentication methods"""
+    
+    def __init__(self, session: requests.Session):
+        """Initialize auth handler with session"""
+        self.session = session
+        self.auth_token = None
+    
+    def login(
+        self,
+        auth_url: str,
+        username: str,
+        password: str,
+        auth_type: str = "form",
+        form_data: Optional[Dict] = None,
+    ) -> bool:
+        """
+        Perform login with given credentials
+        
+        Args:
+            auth_url: URL of the login endpoint
+            username: Username for authentication
+            password: Password for authentication
+            auth_type: Type of authentication (form, basic, bearer, jwt)
+            form_data: Additional form data for form-based auth
+        
+        Returns:
+            bool: True if login successful, False otherwise
+        """
+        try:
+            if auth_type == "form":
+                return self._form_login(auth_url, username, password, form_data)
+            elif auth_type == "basic":
+                return self._basic_auth(auth_url, username, password)
+            elif auth_type == "bearer":
+                return self._bearer_auth(auth_url, username, password)
+            elif auth_type == "jwt":
+                return self._jwt_auth(auth_url, username, password)
+            else:
+                logging.error(f"Unsupported authentication type: {auth_type}")
+                return False
+                
+        except Exception as e:
+            logging.error(f"Login failed: {e}")
+            return False
+    
+    def _form_login(
+        self,
+        auth_url: str,
+        username: str,
+        password: str,
+        form_data: Optional[Dict] = None,
+    ) -> bool:
+        """Handle form-based authentication"""
+        try:
+            # Prepare form data
+            data = form_data or {}
+            data.update({
+                "username": username,
+                "password": password,
+            })
+            
+            # Make login request
+            response = self.session.post(auth_url, data=data)
+            
+            # Check for successful login
+            if response.ok:
+                # Try to extract token from response
+                try:
+                    json_data = response.json()
+                    if "token" in json_data:
+                        self.auth_token = json_data["token"]
+                        self.session.headers.update({
+                            "Authorization": f"Bearer {self.auth_token}"
+                        })
+                except json.JSONDecodeError:
+                    pass
+                
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logging.error(f"Form login failed: {e}")
+            return False
+    
+    def _basic_auth(self, auth_url: str, username: str, password: str) -> bool:
+        """Handle HTTP Basic authentication"""
+        try:
+            response = self.session.get(
+                auth_url,
+                auth=HTTPBasicAuth(username, password)
+            )
+            return response.ok
+            
+        except Exception as e:
+            logging.error(f"Basic auth failed: {e}")
+            return False
+    
+    def _bearer_auth(self, auth_url: str, username: str, password: str) -> bool:
+        """Handle Bearer token authentication"""
+        try:
+            # First get the token
+            response = self.session.post(auth_url, json={
+                "username": username,
+                "password": password
+            })
+            
+            if response.ok:
+                try:
+                    token = response.json()["token"]
+                    self.auth_token = token
+                    self.session.headers.update({
+                        "Authorization": f"Bearer {token}"
+                    })
+                    return True
+                except (KeyError, json.JSONDecodeError):
+                    pass
+            
+            return False
+            
+        except Exception as e:
+            logging.error(f"Bearer auth failed: {e}")
+            return False
+    
+    def _jwt_auth(self, auth_url: str, username: str, password: str) -> bool:
+        """Handle JWT authentication"""
+        try:
+            # Get JWT token
+            response = self.session.post(auth_url, json={
+                "username": username,
+                "password": password
+            })
+            
+            if response.ok:
+                try:
+                    token = response.json()["token"]
+                    self.auth_token = token
+                    self.session.headers.update({
+                        "Authorization": f"JWT {token}"
+                    })
+                    return True
+                except (KeyError, json.JSONDecodeError):
+                    pass
+            
+            return False
+            
+        except Exception as e:
+            logging.error(f"JWT auth failed: {e}")
+            return False
+    
+    def set_token(self, token: str, token_type: str = "Bearer") -> None:
+        """Set authentication token manually"""
+        self.auth_token = token
+        self.session.headers.update({
+            "Authorization": f"{token_type} {token}"
+        })
+    
+    def clear_auth(self) -> None:
+        """Clear authentication data"""
+        self.auth_token = None
+        if "Authorization" in self.session.headers:
+            del self.session.headers["Authorization"] 
